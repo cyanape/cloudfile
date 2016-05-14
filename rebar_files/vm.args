@@ -1,0 +1,19 @@
+## Name of the node
+-name cloudfile@127.0.0.1
+
+## Cookie for distributed erlang
+-setcookie 2abd9af3b4e30f2c7483ebe92d5af3e41b57473b30207f247125139221e9ae6b
+
+## Heartbeat management; auto-restarts VM if it dies or becomes unresponsive
+## (Disabled by default..use with caution!)
+##-heart
+
+## Enable kernel poll and a few async threads
+##+K true
+##+A 5
+
+## Increase number of concurrent ports/sockets
+##-env ERL_MAX_PORTS 4096
+
+## Tweak GC to run more often
+##-env ERL_FULLSWEEP_AFTER 10

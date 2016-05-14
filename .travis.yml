@@ -1,0 +1,9 @@
+language: erlang
+script: "make && make test"
+env: DB=couchdb
+services:
+    - couchdb
+otp_release:
+   - 17.0
+   - 17.1
+   - 17.3
