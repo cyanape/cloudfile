@@ -25,7 +25,7 @@ clean:
 quick_clean:
 	${REBAR} skip_deps=true clean
 
-package:
+release:
 	${REBAR} get-deps compile generate
 
 run: quick

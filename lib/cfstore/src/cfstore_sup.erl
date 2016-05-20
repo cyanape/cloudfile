@@ -73,7 +73,7 @@ init_couch_engine(Application) ->
       end,
     CouchOpts = application:get_env(Application, couch_opts, []),
 
-    {couch,
-        {couch, start_link, [CouchUrl, CouchOpts]},
+    {cfstore,
+        {cfstore, start_link, [couch, [CouchUrl, CouchOpts]]},
         permanent, 1000, worker,
-        [couch]}.
+        [cfstore]}.
