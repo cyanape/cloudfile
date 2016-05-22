@@ -41,8 +41,16 @@ hashPass(Password, Salt, Factor) when (Factor rem 2) > 0 ->
 hashPass(Password, Salt, Factor) ->
   hashPass(hash_sha256(lists:concat([Salt, Password])), Salt, Factor - 1).
 
+hash_mail(Email) ->
+    lists:concat([hash_sha256(Email), hash_md5(Email)]).
+
 hash_sha256(Str) ->
   HashBin =  crypto:hash(sha256, Str),
+  HashList = binary_to_list(HashBin),
+  lists:flatten(list2hex(HashList)).
+
+hash_md5(Str) ->
+  HashBin =  crypto:hash(md5, Str),
   HashList = binary_to_list(HashBin),
   lists:flatten(list2hex(HashList)).
 

@@ -37,25 +37,6 @@
 %%% API
 %%%===================================================================
 
-%% accepts: {email, Email} | {oukey, OUKey} | {ukey, UKey},
-%% gives:
-%% {ok, [
-%%   {sesRef, Ref},
-%%   {salt, Salt},
-%%   {privKey, PrivKey}, b
-%%   {pubKey, PubKey}, B
-%%   {prime, Prime},
-%%   {generator, Generator},
-%%   {version, Version},
-%%   {verifier, Verifier} v = g^x
-%% ]}
-begin_srp({email, Email}) ->
-    {ok, UKey} = ukey:get_ukey({email, Email}),
-    begin_srp_internal({ukey, UKey});
-begin_srp({oukey, OUKey}) -> begin_srp_internal({oukey, OUKey});
-begin_srp({aukey, AUKey}) -> begin_srp_internal({aukey, AUKey});
-begin_srp({ukey, UKey}) -> begin_srp_internal({ukey, UKey}).
-
 verifier(Generator, DerivedKey, Prime) -> crypto:mod_pow(Generator, DerivedKey, Prime).
 
 derived_key(Salt, Username, Password, Factor) ->
@@ -67,6 +48,31 @@ prime(UserPrimeBytes, UserGenerator) -> crypto:dh_generate_parameters(UserPrimeB
 
 new_salt() -> crypto_util:uuid().
 
+%% accepts: {email, Email} | {oukey, OUKey} | {ukey, UKey},
+%% gives:
+%% {ok, {[
+%%   {sesRef, Ref},
+%%   {salt, Salt},
+%%   {privKey, PrivKey}, b
+%%   {pubKey, PubKey}, B
+%%   {prime, Prime},
+%%   {generator, Generator},
+%%   {version, Version},
+%%   {verifier, Verifier} v = g^x
+%% ]}}
+begin_srp({email, Email}) ->
+    {ok, UKey} = ukey:get_ukey({email, Email}),
+    generate_srp({ukey, UKey});
+begin_srp({oukey, OUKey}) ->
+    {ok, SRPDoc} = oukey:get(secrets, {oukey, OUKey}),
+    generate_srp(SRPDoc);
+begin_srp({aukey, AUKey}) ->
+    {ok, SRPDoc} = aukey:get(secrets, {aukey, AUKey}),
+    generate_srp(SRPDoc);
+begin_srp({ukey, UKey}) ->
+    {ok, SRPDoc} = ukey:get(secrets, {ukey, UKey}),
+    generate_srp(SRPDoc).
+
 %% [
 %%   {privKey, PrivKey},
 %%   {pubKey, PubKey},
@@ -76,24 +82,6 @@ new_salt() -> crypto_util:uuid().
 %%   {verifier, Verifier}
 %% ]
 compute_key(server, {clientPub, ClientPub}, SrpSesList) ->
-    compute_key_internal({server, {clientPub, ClientPub}}, SrpSesList);
-
-%% [
-%%   {privKey, PrivKey},
-%%   {pubKey, PubKey},
-%%   {derivedKey, DerivedKey},
-%%   {prime, Prime},
-%%   {generator, Generator},
-%%   {version, Version}
-%% ]
-compute_key(client, {serverPub, ServerPub}, SrpSesList) ->
-  compute_key_internal({client, {serverPub, ServerPub}}, SrpSesList).
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-
-compute_key_internal({server, {clientPub, ClientPub}}, SrpSesList) ->
     PrivKey = proplists:get_value(<<"privKey">>, SrpSesList),
     PubKey = proplists:get_value(<<"pubKey">>, SrpSesList),
     Prime = proplists:get_value(<<"prime">>, SrpSesList),
@@ -105,7 +93,15 @@ compute_key_internal({server, {clientPub, ClientPub}}, SrpSesList) ->
 
     {ok, SKey};
 
-compute_key_internal({client, {serverPub, ServerPub}}, SrpSesList) ->
+%% [
+%%   {privKey, PrivKey},
+%%   {pubKey, PubKey},
+%%   {derivedKey, DerivedKey},
+%%   {prime, Prime},
+%%   {generator, Generator},
+%%   {version, Version}
+%% ]
+compute_key(client, {serverPub, ServerPub}, SrpSesList) ->
     PrivKey = proplists:get_value(<<"privKey">>, SrpSesList),
     PubKey = proplists:get_value(<<"pubKey">>, SrpSesList),
     DerivedKey = proplists:get_value(<<"derivedKey">>, SrpSesList),
@@ -117,44 +113,34 @@ compute_key_internal({client, {serverPub, ServerPub}}, SrpSesList) ->
 
     {ok, SKey}.
 
-begin_srp_internal({Type, Key}) ->
-    Ref = crypto_util:uuid(), %% TODO store this
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
-    Essentials =
-        case Type of
-            aukey -> aukey:srp_essentials(Key);
-            oukey -> oukey:srp_essentials(Key);
-            ukey -> ukey:srp_essentials(Key)
-        end,
+generate_srp({SRPEssentialsKVList}) ->
+    Ref = crypto_util:uuid(),
+    Salt = base64:decode(proplists:get_value(<<"srpsalt">>, SRPEssentialsKVList)), %% get salt of user
+    Version = binary_to_atom(proplists:get_value(<<"version">>, SRPEssentialsKVList), utf8), %% get User's Version
+    Verifier = base64:decode(proplists:get_value(<<"verifier">>, SRPEssentialsKVList)), %% Get User's Verifier
+    UserPrimeBytes = proplists:get_value(<<"userPrimeBytes">>, SRPEssentialsKVList), %% get Prime of user
+    UserGenerator = proplists:get_value(<<"userGenerator">>, SRPEssentialsKVList), %% get generator of user
+    PrivKey = base64:decode(proplists:get_value(<<"privKey">>, SRPEssentialsKVList)), %% get User's Private
 
-    case Essentials of
-        undefined -> {error, undefined};
-        {error, Error} -> {error, Error};
-        {ok, EssentialsKVList} ->
-            Salt = base64:decode(proplists:get_value(<<"srpsalt">>, EssentialsKVList)), %% get salt of user
-            Version = binary_to_atom(proplists:get_value(<<"version">>, EssentialsKVList), utf8), %% get User's Version
-            Verifier = base64:decode(proplists:get_value(<<"verifier">>, EssentialsKVList)), %% Get User's Verifier
-            UserPrimeBytes = proplists:get_value(<<"userPrimeBytes">>, EssentialsKVList), %% get Prime of user
-            UserGenerator = proplists:get_value(<<"userGenerator">>, EssentialsKVList), %% get generator of user
-            PrivKey = base64:decode(proplists:get_value(<<"privKey">>, EssentialsKVList)), %% get User's Private
+    %% Prime & Generator --> Bin
+    [Prime, Generator] = prime(UserPrimeBytes, UserGenerator),
+    %% PubKey = Bin,
+    {PubKey, PrivKey} = crypto:generate_key(srp, {user, [Generator, Prime, Version]}, PrivKey),
 
-            %% Prime & Generator --> Bin
-            [Prime, Generator] = prime(UserPrimeBytes, UserGenerator),
-            %% PubKey = Bin,
-            {PubKey, PrivKey} = crypto:generate_key(srp, {user, [Generator, Prime, Version]}, PrivKey),
-
-            {ok, [
-                {sesRef, base64:encode(Ref)},
-                {salt, base64:encode(Salt)},
-                {privKey, base64:encode(PrivKey)},
-                {pubKey, base64:encode(PubKey)},
-                {prime, base64:encode(Prime)},
-                {generator, Generator},
-                {version, Version},
-                {verifier, base64:encode(Verifier)}
-            ]};
-        Err -> {error, Err}
-    end.
+    {ok, [
+        {sesRef, base64:encode(Ref)},
+        {salt, base64:encode(Salt)},
+        {privKey, base64:encode(PrivKey)},
+        {pubKey, base64:encode(PubKey)},
+        {prime, base64:encode(Prime)},
+        {generator, Generator},
+        {version, Version},
+        {verifier, base64:encode(Verifier)}
+    ]}.
 
 hashPass(Password, Salt, 0) ->
     crypto_util:hashPass(lists:concat([Password, Salt]));

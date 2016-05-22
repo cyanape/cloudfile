@@ -107,12 +107,12 @@ extract_PUBRSA(RSA_Input) ->
 
 
 %% Example of use
-%% {privKey, RSAKey} = sign_server:generate_rsa(private).
-%% {pubKey, RSAPubKey} = sign_server:generate_rsa(public, RSAKey).
+%% {privKey, RSAKey} = sign:generate_rsa(private).
+%% {pubKey, RSAPubKey} = sign:generate_rsa(public, RSAKey).
 %%
-%% {keyey, RSAPrivateKey} = sign_server:decode_rsa(RSAKey).
-%% {keyey, PubKey} = sign_server:decode_rsa(RSAPubKey).
+%% {keyey, RSAPrivateKey} = sign:decode_rsa(RSAKey).
+%% {keyey, PubKey} = sign:decode_rsa(RSAPubKey).
 %%
-%% {signature, Signature} = sign_server:sign(<<"test">>, RSAPrivateKey).
+%% {signature, Signature} = sign:sign(<<"test">>, RSAPrivateKey).
 %%
-%% sign_server:verify(<<"test">>, Signature, PubKey) =:= true.
+%% sign:verify(<<"test">>, Signature, PubKey) =:= true.

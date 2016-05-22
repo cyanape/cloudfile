@@ -24,8 +24,9 @@
 
 -export([
     generate/1,
-    get_ukey/1,
-    srp_essentials/1
+    fetch/2,
+    get/2,
+    store/3
 ]).
 
 -include("cfuser.hrl").
@@ -34,37 +35,47 @@
 %%% API
 %%%===================================================================
 
+generate({ukey, UKey}) ->
+    generate(#oukey_generate{ukey = UKey,
+        userPrimeBytes = ?User_Prime_Bytes,
+        userGenerator = ?User_Generator, factor = ?Factor,
+        version = ?User_SRP_Version, userRSABits = ?User_RSA_Bits
+    });
+
 generate(#oukey_generate{ukey = UKey,
-    email = Email, userPrimeBytes = UserPrimeBytes,
-    userGenerator = UserGenerator, factor = Factor,
-    version = Version, userRSABits = UserRSABits
+    userPrimeBytes = UserPrimeBytes, userGenerator = UserGenerator,
+    factor = Factor, version = Version, userRSABits = UserRSABits
 }) ->
 
-    SrpSalt = srp_server:new_salt(),
-    OSalt = srp_server:new_salt(),
-    OUKey = srp_server:new_salt(),
-    Secret = ds_util:hashPass(srp_server:new_salt(), OSalt, 2),
+    SrpSalt = srp:new_salt(),
+    OSalt = srp:new_salt(),
+    OUKey = srp:new_salt(),
+    Secret = ds_util:hashPass(srp:new_salt(), OSalt, 2),
 
-    [OPrime, OGenerator] = srp_server:prime(UserPrimeBytes, UserGenerator),
-    ODerivedKey = srp_server:derived_key(OSalt, OUKey, Secret, Factor),
-    OVerifier = srp_server:verifier(OGenerator, ODerivedKey, OPrime),
+    [OPrime, OGenerator] = srp:prime(UserPrimeBytes, UserGenerator),
+    ODerivedKey = srp:derived_key(OSalt, OUKey, Secret, Factor),
+    OVerifier = srp:verifier(OGenerator, ODerivedKey, OPrime),
     {_, OPrivKey} = crypto:generate_key(srp, {user, [OGenerator, OPrime, Version]}),
 
-    {privKey, ORsaPrivKey} = sign_server:generate_rsa(private, UserRSABits),
+    {privKey, ORsaPrivKey} = sign:generate_rsa(private, UserRSABits),
 
-    cfstore:save(?couch_oukeys, {[
+    % ?couch_oukeys
+    OUKeyDoc = {[
         {<<"_id">>, list_to_binary(OUKey)},
         {<<"key">>, UKey},
-        {<<"email">>, Email},
         {<<"openkey">>, list_to_binary(OUKey)},
         {<<"scope">>, jiffy:encode(?Scope_all)}
-    ]}),
-    cfstore:save(?couch_salts, {[
+    ]},
+
+    % ?couch_salts
+    SaltDoc = {[
         {<<"_id">>, list_to_binary(OUKey)},
         {<<"key">>, list_to_binary(OUKey)},
         {<<"salt">>, list_to_binary(OSalt)}
-    ]}),
-    cfstore:save(?couch_secrets, {[
+    ]},
+
+    % ?couch_secrets
+    SecretDoc = {[
         {<<"_id">>, list_to_binary(OUKey)},
         {<<"key">>, list_to_binary(OUKey)},
         {<<"srpsalt">>, base64:encode(SrpSalt)},
@@ -76,34 +87,57 @@ generate(#oukey_generate{ukey = UKey,
         {<<"version">>, Version},
         {<<"privKey">>, base64:encode(OPrivKey)},
         {<<"factor">>, Factor}
-    ]}),
-    cfstore:save(?couch_rsa, {[
+    ]},
+
+    % ?couch_rsa
+    RSADoc = {[
         {<<"_id">>, list_to_binary(OUKey)},
         {<<"key">>, list_to_binary(OUKey)},
         {<<"rsaPrivKey">>, base64:encode(ORsaPrivKey)},
         {<<"rsaBits">>, UserRSABits}
-    ]}),
+    ]},
 
-  {ok, #oukey_generate_rsp{oukey = list_to_binary(OUKey), secret = list_to_binary(Secret)}}.
+    {ok, #oukey_generate_rsp{
+        oukey = list_to_binary(OUKey), secret = list_to_binary(Secret),
+        oukey_doc = OUKeyDoc, salt_doc = SaltDoc, secret_doc = SecretDoc,
+        rsa_doc = RSADoc
+    }}.
 
-get_ukey({oukey, OUkey}) ->
-    case cfstore:get(?couch_oukeys, OUkey) of
-        {error, _Error} -> {error, "Uknown Key"};
-        {ok, OUKeyJson} ->
-            {OUKeyKVList} = OUKeyJson,
-            Ukey = proplists:get_value(<<"key">>, OUKeyKVList),
-            {ok, Ukey};
-        _ -> {error, "Uknown Key"}
+fetch(oukey, {ukey, UKey}) ->
+    case cfstore:fetch(?couch_oukeys, {?couch_oukeys_design, ?couch_oukeys_design_view}, [{key, UKey}]) of
+        {ok, OUKeyDocList} -> {ok, OUKeyDocList};
+        {error, Error} -> {error, Error}
     end.
 
-srp_essentials(Key) ->
-    case cfstore:get(?couch_secrets, Key) of
-        {error, Error} -> {error, Error};
-        {ok, EssentialsJson} ->
-            {EssentialsKVList} = EssentialsJson,
-            {ok, EssentialsKVList};
-        Error -> {error, Error}
+get(oukey, {oukey, OUKey}) ->
+    case cfstore:get(?couch_oukeys, OUKey) of
+        {ok, OUKeyDoc} -> {ok, OUKeyDoc};
+        {error, Error} -> {error, Error}
+    end;
+get(user, {oukey, OUKey}) ->
+    {ok, {OUKeyKVList}} = get(oukey, {oukey, OUKey}),
+    UKey = proplists:get_value(<<"key">>, OUKeyKVList),
+    ukey:get(user, {ukey, UKey});
+get(salt, {oukey, OUKey}) ->
+    case cfstore:get(?couch_salts, OUKey) of
+        {ok, SaltDoc} -> {ok, SaltDoc};
+        {error, Error} -> {error, Error}
+    end;
+get(secrets, {oukey, OUKey}) ->
+    case cfstore:get(?couch_secrets, OUKey) of
+        {ok, SecretDoc} -> {ok, SecretDoc};
+        {error, Error} -> {error, Error}
+    end;
+get(rsa, {oukey, OUKey}) ->
+    case cfstore:get(?couch_rsa, OUKey) of
+        {ok, RSADoc} -> {ok, RSADoc};
+        {error, Error} -> {error, Error}
     end.
+
+store(oukey, _Id, Doc) -> cfstore:save(?couch_oukeys, Doc);
+store(salt, _Id, Doc) -> cfstore:save(?couch_salts, Doc);
+store(secrets, _Id, Doc) -> cfstore:save(?couch_secrets, Doc);
+store(rsa, _Id, Doc) -> cfstore:save(?couch_rsa, Doc).
 
 %%%===================================================================
 %%% Internal functions

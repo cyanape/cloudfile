@@ -60,7 +60,7 @@ register(Email) ->
         %% Generate an Open Key for this user
         {ok, #oukey_generate_rsp{oukey = OUKey, secret = Secret}} =
           oukey:generate(#oukey_generate{
-            ukey = UKey, email = Email,
+            ukey = UKey,
             userPrimeBytes = UserPrimeBytes,
             userGenerator = UserGenerator,
             factor = Factor, version = Version,
@@ -142,7 +142,7 @@ generate(oukey, Params) ->
 
   {ok, #oukey_generate_rsp{oukey = OUKey, secret = Secret}} =
     oukey:generate(#oukey_generate{
-      ukey = UKey, email = Email,
+      ukey = UKey,
       userPrimeBytes = ?User_Prime_Bytes,
       userGenerator = ?User_Generator,
       factor = ?Factor, version = ?User_SRP_Version,

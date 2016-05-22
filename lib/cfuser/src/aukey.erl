@@ -24,8 +24,9 @@
 
 -export([
     generate/1,
-    get_aukey/1,
-    srp_essentials/1
+    fetch/2,
+    get/2,
+    store/3
 ]).
 
 -include("cfuser.hrl").
@@ -34,36 +35,48 @@
 %%% API
 %%%===================================================================
 
+generate({oukey, OUKey}) ->
+    generate(#aukey_generate{oukey = OUKey,
+        userPrimeBytes = ?User_Prime_Bytes,
+        userGenerator = ?User_Generator, factor = ?Factor,
+        version = ?User_SRP_Version, userRSABits = ?User_RSA_Bits
+    });
+
 generate(#aukey_generate{oukey = OUKey,
     userPrimeBytes = UserPrimeBytes,
     userGenerator = UserGenerator, factor = Factor,
     version = Version, userRSABits = UserRSABits
 }) ->
 
-    SrpSalt = srp_server:new_salt(),
-    ASalt = srp_server:new_salt(),
-    AUKey = srp_server:new_salt(),
-    ASecret = ds_util:hashPass(srp_server:new_salt(), ASalt, 2),
+    SrpSalt = srp:new_salt(),
+    ASalt = srp:new_salt(),
+    AUKey = srp:new_salt(),
+    ASecret = ds_util:hashPass(srp:new_salt(), ASalt, 2),
 
-    [APrime, AGenerator] = srp_server:prime(UserPrimeBytes, UserGenerator),
-    ADerivedKey = srp_server:derived_key(ASalt, AUKey, ASecret, Factor),
-    AVerifier = srp_server:verifier(AGenerator, ADerivedKey, APrime),
+    [APrime, AGenerator] = srp:prime(UserPrimeBytes, UserGenerator),
+    ADerivedKey = srp:derived_key(ASalt, AUKey, ASecret, Factor),
+    AVerifier = srp:verifier(AGenerator, ADerivedKey, APrime),
     {_, APrivKey} = crypto:generate_key(srp, {user, [AGenerator, APrime, Version]}),
 
-    {privKey, ARsaPrivKey} = sign_server:generate_rsa(private, UserRSABits),
+    {privKey, ARsaPrivKey} = sign:generate_rsa(private, UserRSABits),
 
-    cfstore:save(?couch_aukeys, {[
+    % ?couch_aukeys
+    AUKeyDoc = {[
         {<<"_id">>, list_to_binary(AUKey)},
         {<<"key">>, OUKey},
         {<<"accesskey">>, list_to_binary(AUKey)},
         {<<"scope">>, jiffy:encode(?Scope_all)}
-    ]}),
-    cfstore:save(?couch_salts, {[
+    ]},
+
+    % ?couch_salts
+    SaltDoc = {[
         {<<"_id">>, list_to_binary(AUKey)},
         {<<"key">>, list_to_binary(AUKey)},
         {<<"salt">>, list_to_binary(ASalt)}
-        ]}),
-    cfstore:save(?couch_secrets, {[
+    ]},
+
+    % ?couch_secrets
+    SecretDoc = {[
         {<<"_id">>, list_to_binary(AUKey)},
         {<<"key">>, list_to_binary(AUKey)},
         {<<"srpsalt">>, base64:encode(SrpSalt)},
@@ -75,37 +88,60 @@ generate(#aukey_generate{oukey = OUKey,
         {<<"version">>, Version},
         {<<"privKey">>, base64:encode(APrivKey)},
         {<<"factor">>, Factor}
-    ]}),
-    cfstore:save(?couch_rsa, {[
+    ]},
+
+    % ?couch_rsa
+    RSADoc = {[
         {<<"_id">>, list_to_binary(AUKey)},
         {<<"key">>, list_to_binary(AUKey)},
         {<<"rsaPrivKey">>, base64:encode(ARsaPrivKey)},
         {<<"rsaBits">>, UserRSABits}
-    ]}),
+    ]},
 
-    {ok, #aukey_generate_rsp{aukey = list_to_binary(AUKey), asecret = list_to_binary(ASecret)}}.
+    {ok, #aukey_generate_rsp{
+        aukey = list_to_binary(AUKey), asecret = list_to_binary(ASecret),
+        aukey_doc = AUKeyDoc, salt_doc = SaltDoc, secret_doc = SecretDoc,
+        rsa_doc = RSADoc
+    }}.
 
-get_aukey({aukey, AUkey}) ->
-    case cfstore:get(?couch_aukeys, AUkey) of
-        {error, Error} -> {error, Error};
-        {ok, DocJson} ->
-            {DocKVList} = DocJson,
-            {ok, [
-                {aukey, proplists:get_value(<<"accesskey">>, DocKVList)},
-                {oukey, proplists:get_value(<<"key">>, DocKVList)},
-                {scope, proplists:get_value(<<"scope">>, DocKVList)}
-            ]};
-        Error -> {error, Error}
-  end.
 
-srp_essentials(Key) ->
-    case cfstore:get(?couch_secrets, Key) of
-        {error, Error} -> {error, Error};
-        {ok, EssentialsJson} ->
-            {EssentialsKVList} = EssentialsJson,
-            {ok, EssentialsKVList};
-        Error -> {error, Error}
+fetch(aukey, {oukey, OUKey}) ->
+    case cfstore:fetch(?couch_aukeys, {?couch_aukeys_design, ?couch_aukeys_design_view}, [{key, OUKey}]) of
+        {ok, AUKeyDocList} -> {ok, AUKeyDocList};
+        {error, Error} -> {error, Error}
     end.
+
+get(aukey, {aukey, AUKey}) ->
+    case cfstore:get(?couch_aukeys, AUKey) of
+        {ok, AUKeyDoc} -> {ok, AUKeyDoc};
+        {error, Error} -> {error, Error}
+    end;
+get(user, {aukey, AUKey}) ->
+    {ok, {AUKeyKVList}} = get(aukey, {aukey, AUKey}),
+    OUKey = proplists:get_value(<<"key">>, AUKeyKVList),
+    {ok, {OUKeyKVList}} = oukey:get(oukey, {oukey, OUKey}),
+    UKey = proplists:get_value(<<"key">>, OUKeyKVList),
+    ukey:get(user, {ukey, UKey});
+get(salt, {aukey, AUKey}) ->
+    case cfstore:get(?couch_salts, AUKey) of
+        {ok, SaltDoc} -> {ok, SaltDoc};
+        {error, Error} -> {error, Error}
+    end;
+get(secrets, {aukey, AUKey}) ->
+    case cfstore:get(?couch_secrets, AUKey) of
+        {ok, SecretDoc} -> {ok, SecretDoc};
+        {error, Error} -> {error, Error}
+    end;
+get(rsa, {aukey, AUKey}) ->
+    case cfstore:get(?couch_rsa, AUKey) of
+        {ok, RSADoc} -> {ok, RSADoc};
+        {error, Error} -> {error, Error}
+    end.
+
+store(aukey, _Id, Doc) -> cfstore:save(?couch_aukeys, Doc);
+store(salt, _Id, Doc) -> cfstore:save(?couch_salts, Doc);
+store(secrets, _Id, Doc) -> cfstore:save(?couch_secrets, Doc);
+store(rsa, _Id, Doc) -> cfstore:save(?couch_rsa, Doc).
 
 %%%===================================================================
 %%% Internal functions

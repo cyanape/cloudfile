@@ -24,9 +24,8 @@
 
 -export([
     generate/1,
-    check/1,
-    get_ukey/1,
-    srp_essentials/1
+    get/2,
+    store/3
 ]).
 
 -include("cfuser.hrl").
@@ -35,40 +34,51 @@
 %%% API
 %%%===================================================================
 
+generate({email, Email}) ->
+    generate(#ukey_generate{email = Email,
+        userPrimeBytes = ?User_Prime_Bytes,
+        userGenerator = ?User_Generator, factor = ?Factor,
+        version = ?User_SRP_Version, userRSABits = ?User_RSA_Bits
+    });
+
 generate(#ukey_generate{email = Email,
     userPrimeBytes = UserPrimeBytes,
     userGenerator = UserGenerator, factor = Factor,
     version = Version, userRSABits = UserRSABits
 }) ->
 
-    MD5Key = hash_md5:build(Email),
+    % hushkie -> woof woof!
+    HashKey = crypto_util:hash_mail(Email),
 
-    SrpSalt = srp_server:new_salt(),
-    UKey = srp_server:new_salt(),
-    Salt = srp_server:new_salt(),
-    Password = srp_server:new_salt(), %% noone will know this password
+    SrpSalt = srp:new_salt(),
+    UKey = srp:new_salt(),
+    Salt = srp:new_salt(),
+    Password = srp:new_salt(), %% noone will know this password
 
-    [Prime, Generator] = srp_server:prime(UserPrimeBytes, UserGenerator),
-    DerivedKey = srp_server:derived_key(Salt, Email, Password, Factor),
-    Verifier = srp_server:verifier(Generator, DerivedKey, Prime),
+    [Prime, Generator] = srp:prime(UserPrimeBytes, UserGenerator),
+    DerivedKey = srp:derived_key(Salt, Email, Password, Factor),
+    Verifier = srp:verifier(Generator, DerivedKey, Prime),
     {_, PrivKey} = crypto:generate_key(srp, {user, [Generator, Prime, Version]}),
 
-    {privKey, RsaPrivKey} = sign_server:generate_rsa(private, UserRSABits),
+    {privKey, RsaPrivKey} = sign:generate_rsa(private, UserRSABits),
 
-    cfstore:save(?couch_users, {[
+    % ?couch_users
+    UserDoc = {[
         {<<"_id">>, list_to_binary(UKey)},
         {<<"key">>, list_to_binary(UKey)},
         {<<"email">>, list_to_binary(Email)},
         {<<"alias">>, [list_to_binary(Email)]}
-    ]}),
+    ]},
 
-    cfstore:save(?couch_salts, {[
+    % ?couch_salts
+    SaltDoc = {[
         {<<"_id">>, list_to_binary(UKey)},
         {<<"key">>, list_to_binary(UKey)},
         {<<"salt">>, list_to_binary(Salt)}
-    ]}),
+    ]},
 
-    cfstore:save(?couch_secrets, {[
+    % ?couch_secrets
+    SecretDoc = {[
         {<<"_id">>, list_to_binary(UKey)},
         {<<"key">>, list_to_binary(UKey)},
         {<<"srpsalt">>, base64:encode(SrpSalt)},
@@ -80,52 +90,63 @@ generate(#ukey_generate{email = Email,
         {<<"version">>, Version},
         {<<"privKey">>, base64:encode(PrivKey)},
         {<<"factor">>, Factor}
-    ]}),
+    ]},
 
-    cfstore:save(?couch_rsa, {[
+    % ?couch_rsa
+    RSADoc = {[
         {<<"_id">>, list_to_binary(UKey)},
         {<<"key">>, list_to_binary(UKey)},
         {<<"rsaPrivKey">>, base64:encode(RsaPrivKey)},
         {<<"rsaBits">>, UserRSABits}
-    ]}),
+    ]},
 
-    cfstore:save(?couch_md5keys, {[
-        {<<"_id">>, list_to_binary(MD5Key)},
+    % ?couch_md5keys
+    MD5Doc = {[
+        {<<"_id">>, list_to_binary(HashKey)},
         {<<"key">>, list_to_binary(UKey)}
-    ]}),
+    ]},
 
-    {ok, #ukey_generate_rsp{email = list_to_binary(Email), ukey = list_to_binary(UKey)}}.
+    {ok, #ukey_generate_rsp{
+        email = list_to_binary(Email), ukey = list_to_binary(UKey),
+        hash_key = list_to_binary(HashKey),
+        user_doc = UserDoc, salt_doc = SaltDoc, secret_doc = SecretDoc,
+        rsa_doc = RSADoc, md5_doc = MD5Doc
+    }}.
 
-check(Email) ->
-    MD5Key = hash_md5:build(Email),
-    %% TODO implement HEAD req instead of GET
-    case cfstore:get(?couch_md5keys, MD5Key) of
-        {error, _Error} -> %% User Should not exist
-            {ok, {nonexist, {key, MD5Key}}};
-        _ ->
-            {ok, {exist, {key, MD5Key}}}
-  end.
+get(email, {email, Email}) -> {ok, crypto_util:hash_mail(Email)};
+get(salt, {ukey, UKey}) ->
+    case cfstore:get(?couch_salts, UKey) of
+        {ok, SaltDoc} -> {ok, SaltDoc};
+        {error, Error} -> {error, Error}
+    end;
+get(secrets, {ukey, UKey}) ->
+    case cfstore:get(?couch_secrets, UKey) of
+        {ok, SecretDoc} -> {ok, SecretDoc};
+        {error, Error} -> {error, Error}
+    end;
+get(rsa, {ukey, UKey}) ->
+    case cfstore:get(?couch_rsa, UKey) of
+        {ok, RSADoc} -> {ok, RSADoc};
+        {error, Error} -> {error, Error}
+    end;
+get(user, {ukey, UKey}) ->
+    case cfstore:get(?couch_users, UKey) of
+        {ok, UserDoc} -> {ok, UserDoc};
+        {error, Error} -> {error, Error}
+    end;
+get(ukey, {email, Email}) ->
+    {ok, HashKey} = get(email, {email, Email}),
 
-get_ukey({email, Email}) ->
-    MD5Key = hash_md5:build(Email),
-
-    case cfstore:get(?couch_md5keys, MD5Key) of
-        {ok, DocJson} ->
-            {DocKVList} = DocJson,
-            UKey = proplists:get_value(<<"key">>, DocKVList),
-            {ok, UKey};
-        {error, Error} ->
-            {error, Error}
+    case cfstore:get(?couch_md5keys, HashKey) of
+        {ok, MD5Doc} -> {ok, MD5Doc};
+        {error, Error} -> {error, Error}
     end.
 
-srp_essentials(Key) ->
-    case cfstore:get(?couch_secrets, Key) of
-        {error, Error} -> {error, Error};
-        {ok, EssentialsJson} ->
-            {EssentialsKVList} = EssentialsJson,
-        {ok, EssentialsKVList};
-    Error -> {error, Error}
-end.
+store(user, _Id, UserDoc) -> cfstore:save(?couch_users, UserDoc);
+store(salt, _Id, SaltDoc) -> cfstore:save(?couch_salts, SaltDoc);
+store(secrets, _Id, SecretDoc) -> cfstore:save(?couch_secrets, SecretDoc);
+store(rsa, _Id, RSADoc) -> cfstore:save(?couch_rsa, RSADoc);
+store(ukey, _Id, MD5Doc) -> cfstore:couch_md5keys(?couch_md5keys, MD5Doc).
 
 %%%===================================================================
 %%% Internal functions

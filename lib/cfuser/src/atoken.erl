@@ -24,8 +24,9 @@
 
 -export([
     generate/1,
-    check/1,
-    get_aukey/1
+    generate/2,
+    check/2,
+    store/3
 ]).
 
 -include("cfuser.hrl").
@@ -34,39 +35,43 @@
 %%% API
 %%%===================================================================
 
+generate({aukey, AUKey}, Scope) ->
+    generate(#atoken_generate{
+        aukey = AUKey, scope = [Scope],
+        expires = ?Default_Atoken_Expiration
+    }).
+
 generate(#atoken_generate{aukey = AUKey, scope = Scope, expires = Expires}) ->
 
-    AToken = srp_server:new_salt(),
-    Salt = srp_server:new_salt(),
+    AToken = srp:new_salt(),
+    Salt = srp:new_salt(),
 
-    cfstore:save(?couch_atokens, {[
+    % ?couch_atokens
+    ATokenDoc = {[
         {<<"_id">>, list_to_binary(AToken)},
         {<<"key">>, AUKey},
         {<<"salt">>, list_to_binary(Salt)},
         {<<"expires">>, list_to_binary(Expires)},
         {<<"scope">>, Scope}
-    ]}),
+    ]},
 
-    {ok, [
-        {atoken, list_to_binary(AToken)},
-        {opensalt, list_to_binary(Salt)},
-        {scope, Scope}
-    ]}.
+    {ok, ATokenDoc}.
 
-check(AToken) ->
+store(atoken, _Id, Doc) -> cfstore:save(?couch_atokens, Doc).
+
+check(AUKey, AToken) ->
     case cfstore:get(?couch_atokens, AToken) of
-        {ok, DocJson} ->
-            {DocKVList} = DocJson,
-            AUKey = proplists:get_value(<<"key">>, DocKVList),
-            Salt = proplists:get_value(<<"salt">>, DocKVList),
-            Scope = proplists:get_value(<<"scope">>, DocKVList, []),
-            ExpiresBin = proplists:get_value(<<"expires">>, DocKVList, <<"0">>),
+        {error, Error} -> {error, Error};
+        {ok, ATokenDoc} ->
+            {ATokenKVList} = ATokenDoc,
+            AUKey = proplists:get_value(<<"key">>, ATokenKVList),
+            Salt = proplists:get_value(<<"salt">>, ATokenKVList),
+            Scope = proplists:get_value(<<"scope">>, ATokenKVList, []),
+            ExpiresBin = proplists:get_value(<<"expires">>, ATokenKVList, <<"0">>),
             Expires = binary_to_integer(ExpiresBin),
 
-            Condition = ds_util:timestamp() < Expires
-                andalso
-                %% Check if AUKey still exists
-                checkKey(AUKey),
+            %% Check if AUKey still exists
+            Condition = ds_util:timestamp() < Expires andalso checkKey(AUKey),
 
             case Condition of
                 false ->
@@ -79,17 +84,7 @@ check(AToken) ->
                         {scope, Scope},
                         {expires, Expires}
                     ]}
-            end;
-        {error, Error} -> {error, Error}
-    end.
-
-get_aukey({atoken, AToken}) ->
-    case cfstore:get(?couch_atokens, AToken) of
-        {ok, DocJson} ->
-            {DocKVList} = DocJson,
-            AUKey = proplists:get_value(<<"key">>, DocKVList),
-            {ok, AUKey};
-        {error, Error} -> {error, Error}
+            end
     end.
 
 %%%===================================================================
@@ -99,7 +94,7 @@ get_aukey({atoken, AToken}) ->
 checkKey(LeftAUKey) ->
     LeftAUKey =/= undefined
         andalso
-        case aukey_server:get_aukey({aukey, LeftAUKey}) of
+        case aukey:get(aukey, {aukey, LeftAUKey}) of
             {ok, _} -> true;
             _ -> false
         end.
