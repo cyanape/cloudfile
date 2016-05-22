@@ -1,5 +1,6 @@
+%%% -*- erlang -*-
 %%%-------------------------------------------------------------------
-%%% @author evangelosp
+%%% @author Evangelos Pappas <epappas@evalonlabs.com>
 %%% @copyright (C) 2014, evalonlabs
 %%% Copyright 2015, evalonlabs
 %%%
@@ -19,24 +20,20 @@
 %%% @end
 %%%-------------------------------------------------------------------
 
-[
-  {cloudfile, [
-    {http_port, 4421},
-    {http_listener_count, 100}
-  ]},
-  {cfile, []},
-  {cfuser, []},
-  {cfstore, [
-      {couch_url, "http://localhost:5984"},
-      {couch_opts, []}
-  ]},
-  {lager, [
-    {colored, true},
-    {async_threshold, 100},
-    {async_threshold_window, 5},
-    {error_logger_hwm, 100},
-    {handlers, [
-      {lager_console_backend, debug}
-    ]}
-  ]}
-].
+{application, cfuser, [
+    {description, ""},
+    {vsn, "0.0.1"},
+    {modules, [
+        cfuser_sup, cfuser, atoken, aukey, oukey, sign, srp, ukey
+    ]},
+    {registered, [cfuser]},
+    {applications, [
+        kernel,
+        stdlib,
+        cf_common,
+        erl_streams,
+        cfstore
+    ]},
+    {mod, {cfuser_app, []}},
+    {env, []}
+]}.

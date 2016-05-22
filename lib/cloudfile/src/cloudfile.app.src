@@ -37,7 +37,8 @@
       cf_common,
       cfile,
       cfstore,
-      erl_streams
+      erl_streams,
+      cfuser
     ]},
     {mod, {cloudfile_app, []}},
     {env, []}

@@ -19,37 +19,23 @@
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
--module(cloudfile).
+-module(cfuser_app).
 -author("epappas").
 
-%% API.
--export([start/0]).
+-behaviour(application).
 
-%% API.
+%% Application callbacks
+-export([start/0, start/2, stop/1]).
+
+%% ===================================================================
+%% Application callbacks
+%% ===================================================================
+
 start() ->
-    lager:start(),
-    application:start(crypto),
-    application:start(asn1),
-    application:start(public_key),
-    application:start(ssl),
-    application:start(bcrypt),
-    application:start(ranch),
-    application:start(metrics),
-    application:start(ssl_verify_fun),
-    application:start(mimerl),
-    application:start(certifi),
-    application:start(hackney),
-    couchbeam:start(), %% application:start(couchbeam),
-    % application:start(couchbeam),
+    cfuser_sup:start_link().
 
-    application:start(cowlib),
-    application:start(cowboy),
-    application:start(erl_streams),
-    application:start(cf_common),
-    application:start(cfile),
-    application:start(cfstore),
-    application:start(cfuser),
-    application:start(cloudfile).
+start(_StartType, _StartArgs) ->
+    start().
 
-    % hackney_trace:set_level(min),
-    % ok = hackney_trace:enable(max, io).
+stop(_State) ->
+    ok.

@@ -19,37 +19,29 @@
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
--module(cloudfile).
+-module(cfuser_sup).
 -author("epappas").
 
-%% API.
--export([start/0]).
+-behaviour(supervisor).
 
 %% API.
-start() ->
-    lager:start(),
-    application:start(crypto),
-    application:start(asn1),
-    application:start(public_key),
-    application:start(ssl),
-    application:start(bcrypt),
-    application:start(ranch),
-    application:start(metrics),
-    application:start(ssl_verify_fun),
-    application:start(mimerl),
-    application:start(certifi),
-    application:start(hackney),
-    couchbeam:start(), %% application:start(couchbeam),
-    % application:start(couchbeam),
+-export([start_link/0]).
 
-    application:start(cowlib),
-    application:start(cowboy),
-    application:start(erl_streams),
-    application:start(cf_common),
-    application:start(cfile),
-    application:start(cfstore),
-    application:start(cfuser),
-    application:start(cloudfile).
+%% Supervisor callbacks
+-export([init/1]).
 
-    % hackney_trace:set_level(min),
-    % ok = hackney_trace:enable(max, io).
+%% Helper macro for declaring children of supervisor
+-define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
+
+%% ===================================================================
+%% API functions
+%% ===================================================================
+
+start_link() -> supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+%% ===================================================================
+%% Supervisor callbacks
+%% ===================================================================
+
+init([]) ->
+    {ok, {{one_for_one, 10, 10}, []}}.
